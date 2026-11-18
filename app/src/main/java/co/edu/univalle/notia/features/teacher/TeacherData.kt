@@ -1,6 +1,8 @@
 package co.edu.univalle.notia.features.teacher
 
 import java.math.BigDecimal
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 enum class ActivityStatus { DRAFT, PUBLISHED }
 
@@ -51,7 +53,7 @@ data class GradeChange(
  */
 object FakeTeacherRepository {
     const val DEMO_SUBJECT_ID = "prog-movil"
-    const val CURRENT_TEACHER = "Docente (demo)"
+    const val CURRENT_TEACHER = "Laura Gómez"
 
     private val subjects = mapOf(
         DEMO_SUBJECT_ID to TeacherSubject(DEMO_SUBJECT_ID, "Programación Móvil", "Curso de Programación", "2026-II")
@@ -79,8 +81,9 @@ object FakeTeacherRepository {
 
     /** grades[activityId][studentId] */
     private val grades: MutableMap<String, MutableMap<String, BigDecimal>> = mutableMapOf(
-        "p1" to seed("3.5", "4.0", "2.8", "4.6", "3.1", "3.9", "2.4", "4.2", "3.3", "4.8"),
-        "taller" to seed("4.2", "3.6", "3.0", "5.0", "2.7", "4.4", "3.2", "4.0", "3.8", "4.5"),
+        // Valores actuales; los anteriores están en el historial de ejemplo (seedHistory).
+        "p1" to seed("4.0", "3.6", "2.8", "4.6", "3.1", "3.9", "2.4", "4.2", "3.3", "4.8").apply { remove("s5") },
+        "taller" to seed("4.2", "3.6", "3.4", "3.8", "2.7", "4.4", "3.2", "4.0", "3.8", "4.5"),
         "p2" to mutableMapOf("s1" to BigDecimal("4.5"), "s2" to BigDecimal("3.2"), "s5" to BigDecimal("2.8")),
         "final" to mutableMapOf(),
     )
@@ -92,8 +95,24 @@ object FakeTeacherRepository {
         ),
     )
 
-    private val history = mutableListOf<GradeChange>()
+    private val history = seedHistory().toMutableList()
     private var nextActivityNumber = 1
+
+    /** Cambios de ejemplo de hoy y de ayer sobre notas publicadas (RF-19). */
+    private fun seedHistory(): List<GradeChange> {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDateTime.now(zone)
+        val yesterday = now.toLocalDate().minusDays(1)
+        fun at(time: LocalDateTime) = time.atZone(zone).toInstant().toEpochMilli()
+        fun grade(value: String?) = value?.let(::BigDecimal)
+        return listOf(
+            GradeChange("p1", "s1", grade("3.5"), grade("4.0"), CURRENT_TEACHER, at(now.minusMinutes(25))),
+            GradeChange("p1", "s2", grade("4.0"), grade("3.6"), CURRENT_TEACHER, at(now.minusMinutes(27))),
+            GradeChange("taller", "s4", null, grade("3.8"), CURRENT_TEACHER, at(now.minusHours(2))),
+            GradeChange("taller", "s3", grade("3.0"), grade("3.4"), CURRENT_TEACHER, at(yesterday.atTime(16, 5))),
+            GradeChange("p1", "s5", grade("3.1"), null, CURRENT_TEACHER, at(yesterday.atTime(15, 58))),
+        )
+    }
 
     private fun seed(vararg values: String): MutableMap<String, BigDecimal> =
         students.zip(values).associate { (student, value) -> student.id to BigDecimal(value) }.toMutableMap()
