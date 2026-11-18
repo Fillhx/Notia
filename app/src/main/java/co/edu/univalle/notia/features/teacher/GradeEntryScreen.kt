@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.edu.univalle.notia.R
@@ -76,16 +77,6 @@ import co.edu.univalle.notia.ui.theme.NotiaTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import java.math.BigDecimal
-
-// Colores del diseño (pantalla 5 y guía de estilo) que aún no están en ui/theme.
-private val ChipDraftBg = Color(0xFFECEDEF)
-private val ChipDraftText = Color(0xFF4B5563)
-private val PrimarySoft = Color(0xFFE8EDFB)
-private val GradeError = Color(0xFFB42318)
-private val SectionLabel = Color(0xFF3F4757)
-private val CellBorder = Color(0xFFD6D2C7)
-private val RowDivider = Color(0xFFEFECE5)
-private val EmptyDash = Color(0xFF7A8191)
 
 private const val AUTOSAVE_DELAY_MS = 1500L
 
@@ -162,6 +153,7 @@ private sealed interface PendingDialog {
     data object Publish : PendingDialog
     data object SavePublished : PendingDialog
     data class DiscardAndSwitch(val activityId: String) : PendingDialog
+    data object DiscardAndOpenScheme : PendingDialog
 }
 
 /** RF-11, RF-12, RNF-06 · Figma "5. Docente · Registro de notas". */
@@ -169,6 +161,7 @@ private sealed interface PendingDialog {
 fun GradeEntryScreen(
     subjectId: String,
     onBack: () -> Unit,
+    onEditScheme: () -> Unit = {},
 ) {
     val state = remember(subjectId) { GradeEntryState(FakeTeacherRepository, subjectId) }
     var dialog by remember { mutableStateOf<PendingDialog?>(null) }
@@ -202,6 +195,15 @@ fun GradeEntryScreen(
         }
     }
 
+    fun openScheme() {
+        if (state.isPublished && state.isDirty) {
+            dialog = PendingDialog.DiscardAndOpenScheme
+        } else {
+            state.saveDraft()
+            onEditScheme()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -227,7 +229,8 @@ fun GradeEntryScreen(
                 activities = state.activities,
                 selected = state.selected,
                 saveStatus = saveStatusText(state.isPublished, state.isDirty, state.lastSavedAt, now),
-                onSelect = ::switchActivity
+                onSelect = ::switchActivity,
+                onEditScheme = ::openScheme
             )
             Spacer(modifier = Modifier.height(16.dp))
             StudentsHeader(count = state.students.size)
@@ -278,6 +281,13 @@ fun GradeEntryScreen(
             onConfirm = { state.load(current.activityId); dialog = null },
             onDismiss = { dialog = null }
         )
+        PendingDialog.DiscardAndOpenScheme -> ConfirmDialog(
+            title = "¿Descartar cambios?",
+            text = "Hay cambios sin guardar en ${state.selected.name}.",
+            confirmLabel = "Descartar",
+            onConfirm = { dialog = null; onEditScheme() },
+            onDismiss = { dialog = null }
+        )
         null -> Unit
     }
 }
@@ -295,24 +305,12 @@ private fun saveStatusText(isPublished: Boolean, isDirty: Boolean, lastSavedAt: 
 }
 
 @Composable
-private fun SubjectHeader(title: String, subtitle: String, onBack: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        NotiaBackButton(onClick = onBack, icon = painterResource(R.drawable.ic_chevron_left))
-        Spacer(modifier = Modifier.width(12.dp))
-        Column {
-            Text(text = title, style = MaterialTheme.typography.titleMedium, color = NotiaInk)
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
-        }
-    }
-}
-
-@Composable
 private fun ActivityCard(
     activities: List<GradeActivity>,
     selected: GradeActivity,
     saveStatus: String,
     onSelect: (String) -> Unit,
+    onEditScheme: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(18.dp)
@@ -374,46 +372,30 @@ private fun ActivityCard(
                     }
                 )
             }
+            HorizontalDivider(color = RowDivider)
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Editar esquema de evaluación",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NotiaPrimary
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_pencil),
+                        contentDescription = null,
+                        tint = NotiaPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onEditScheme()
+                }
+            )
         }
-    }
-}
-
-@Composable
-private fun ActivityStatusChip(status: ActivityStatus, long: Boolean) {
-    when (status) {
-        ActivityStatus.DRAFT -> StatusChip(
-            icon = R.drawable.ic_pencil,
-            text = if (long) "Borrador · solo tú lo ves" else "Borrador",
-            background = ChipDraftBg,
-            content = ChipDraftText
-        )
-        ActivityStatus.PUBLISHED -> StatusChip(
-            icon = R.drawable.ic_eye_small,
-            text = if (long) "Publicada · la ven los estudiantes" else "Publicada",
-            background = PrimarySoft,
-            content = NotiaPrimary
-        )
-    }
-}
-
-/** Chip de estado de la guía de estilo: icono + texto + color (RNF-09). */
-@Composable
-private fun StatusChip(@DrawableRes icon: Int, text: String, background: Color, content: Color) {
-    Row(
-        modifier = Modifier
-            .height(28.dp)
-            .background(background, RoundedCornerShape(14.dp))
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(painter = painterResource(icon), contentDescription = null, tint = content, modifier = Modifier.size(14.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = content
-        )
     }
 }
 
@@ -422,12 +404,7 @@ private fun StudentsHeader(count: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = "ESTUDIANTES ($count)",
-            style = TextStyle(
-                fontFamily = InterFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
-                letterSpacing = 0.6.sp
-            ),
+            style = SectionLabelStyle,
             color = SectionLabel,
             modifier = Modifier.weight(1f)
         )
@@ -558,10 +535,11 @@ private fun GradeCell(
     )
 }
 
+/** Línea de error bajo una fila: icono X + mensaje en rojo (Figma, pantalla 5). */
 @Composable
-private fun GradeErrorLine(message: String) {
+internal fun GradeErrorLine(message: String, startPadding: Dp = 48.dp) {
     Row(
-        modifier = Modifier.padding(start = 48.dp, bottom = 12.dp),
+        modifier = Modifier.padding(start = startPadding, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -624,33 +602,6 @@ private fun BottomActions(
             modifier = Modifier.fillMaxWidth()
         )
     }
-}
-
-@Composable
-private fun ConfirmDialog(
-    title: String,
-    text: String,
-    confirmLabel: String,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
-        containerColor = NotiaSurface,
-        title = { Text(text = title, style = MaterialTheme.typography.titleLarge, color = NotiaInk) },
-        text = { Text(text = text, style = MaterialTheme.typography.bodyMedium, color = NotiaTextSecondary) },
-        confirmButton = {
-            TextButton(onClick = onConfirm, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(text = confirmLabel, style = MaterialTheme.typography.titleMedium, color = NotiaPrimary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(text = "Cancelar", style = MaterialTheme.typography.titleMedium, color = NotiaTextSecondary)
-            }
-        }
-    )
 }
 
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
