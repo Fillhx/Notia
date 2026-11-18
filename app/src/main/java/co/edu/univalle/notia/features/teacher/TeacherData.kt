@@ -28,6 +28,13 @@ data class EnrolledStudent(
         get() = name.split(" ").filter { it.isNotBlank() }.take(2).joinToString("") { it.first().uppercase() }
 }
 
+/** Actividad tal como queda al guardar el esquema (RF-10). `id = null` es una actividad nueva. */
+data class SchemeEntry(
+    val id: String?,
+    val name: String,
+    val percentage: Int,
+)
+
 /** Entrada del historial de cambios de notas publicadas (RF-19, RN-08). */
 data class GradeChange(
     val activityId: String,
@@ -79,6 +86,7 @@ object FakeTeacherRepository {
     )
 
     private val history = mutableListOf<GradeChange>()
+    private var nextActivityNumber = 1
 
     private fun seed(vararg values: String): MutableMap<String, BigDecimal> =
         students.zip(values).associate { (student, value) -> student.id to BigDecimal(value) }.toMutableMap()
@@ -93,6 +101,30 @@ object FakeTeacherRepository {
         grades[activityId].orEmpty().toMap()
 
     fun history(subjectId: String): List<GradeChange> = history.toList()
+
+    fun gradeCount(subjectId: String, activityId: String): Int = grades[activityId]?.size ?: 0
+
+    /**
+     * Reemplaza el esquema de la materia (RF-10). Las actividades nuevas quedan en borrador.
+     * RN-03: los porcentajes deben sumar 100. No se borra una actividad que tenga notas.
+     */
+    fun saveScheme(subjectId: String, entries: List<SchemeEntry>) {
+        require(entries.sumOf { it.percentage } == 100) { "RN-03: el esquema debe sumar 100 %" }
+        val keptIds = entries.mapNotNull { it.id }.toSet()
+        activities.filter { it.id !in keptIds }.forEach { removed ->
+            check(gradeCount(subjectId, removed.id) == 0) { "${removed.name} tiene notas y no se puede eliminar" }
+            grades.remove(removed.id)
+        }
+        val updated = entries.map { entry ->
+            if (entry.id == null) {
+                GradeActivity("nueva-${nextActivityNumber++}", entry.name.trim(), entry.percentage, ActivityStatus.DRAFT)
+            } else {
+                activity(entry.id).copy(name = entry.name.trim(), percentage = entry.percentage)
+            }
+        }
+        activities.clear()
+        activities.addAll(updated)
+    }
 
     /** Guarda notas en borrador; `null` borra la nota de ese estudiante. */
     fun saveDraft(subjectId: String, activityId: String, values: Map<String, BigDecimal?>) {
