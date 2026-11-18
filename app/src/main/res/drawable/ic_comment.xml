@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono de Figma "Notia · Diseño inicial" (9. Docente · Retroalimentación). Color con tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="14dp"
+    android:height="14dp"
+    android:viewportWidth="14"
+    android:viewportHeight="14">
+    <path
+        android:pathData="M2.5,3H11.5C12.05,3 12.5,3.45 12.5,4V9C12.5,9.55 12.05,10 11.5,10H6L3.5,12V10H2.5C1.95,10 1.5,9.55 1.5,9V4C1.5,3.45 1.95,3 2.5,3Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#FF000000"
+        android:strokeLineJoin="round" />
+</vector>

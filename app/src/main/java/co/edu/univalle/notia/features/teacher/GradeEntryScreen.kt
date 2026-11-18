@@ -96,6 +96,9 @@ private class GradeEntryState(
 
     /** Texto de cada celda, por id de estudiante. */
     val inputs = mutableStateMapOf<String, String>()
+
+    /** Retroalimentación guardada de la actividad seleccionada, por id de estudiante (RF-13). */
+    val feedback = mutableStateMapOf<String, String>()
     private var savedInputs by mutableStateOf(emptyMap<String, String>())
     var lastSavedAt by mutableStateOf<Long?>(null)
         private set
@@ -118,6 +121,13 @@ private class GradeEntryState(
         students.forEach { inputs[it.id] = grades[it.id]?.toPlainString().orEmpty() }
         savedInputs = inputs.toMap()
         lastSavedAt = null
+        feedback.clear()
+        feedback.putAll(repo.feedback(subjectId, activityId))
+    }
+
+    fun saveFeedback(studentId: String, text: String?) {
+        repo.saveFeedback(subjectId, selectedId, studentId, text)
+        if (text == null) feedback.remove(studentId) else feedback[studentId] = text
     }
 
     /** Notas listas para guardar: vacías se borran, las inválidas se dejan como estaban. */
@@ -165,6 +175,7 @@ fun GradeEntryScreen(
 ) {
     val state = remember(subjectId) { GradeEntryState(FakeTeacherRepository, subjectId) }
     var dialog by remember { mutableStateOf<PendingDialog?>(null) }
+    var feedbackStudent by remember { mutableStateOf<EnrolledStudent?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
@@ -239,7 +250,9 @@ fun GradeEntryScreen(
                 students = state.students,
                 inputs = state.inputs,
                 parsed = state.parsed,
-                onValueChange = { studentId, text -> state.inputs[studentId] = sanitizeGradeText(text) }
+                withFeedback = state.feedback.keys,
+                onValueChange = { studentId, text -> state.inputs[studentId] = sanitizeGradeText(text) },
+                onOpenFeedback = { feedbackStudent = it }
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -252,6 +265,17 @@ fun GradeEntryScreen(
             onSaveDraft = state::saveDraft,
             onPublish = { dialog = PendingDialog.Publish },
             onSavePublished = { dialog = PendingDialog.SavePublished }
+        )
+    }
+
+    feedbackStudent?.let { student ->
+        FeedbackSheet(
+            student = student,
+            gradeText = state.inputs[student.id].orEmpty(),
+            activity = state.selected,
+            existing = state.feedback[student.id],
+            onSave = { text -> state.saveFeedback(student.id, text) },
+            onDismiss = { feedbackStudent = null }
         )
     }
 
@@ -408,7 +432,7 @@ private fun StudentsHeader(count: Int) {
             color = SectionLabel,
             modifier = Modifier.weight(1f)
         )
-        Text(text = "Escala 0.0 – 5.0", style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
+        Text(text = "Toca un nombre para comentar", style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
     }
 }
 
@@ -417,7 +441,9 @@ private fun StudentsCard(
     students: List<EnrolledStudent>,
     inputs: Map<String, String>,
     parsed: Map<String, GradeInput>,
+    withFeedback: Set<String>,
     onValueChange: (studentId: String, text: String) -> Unit,
+    onOpenFeedback: (EnrolledStudent) -> Unit,
 ) {
     val shape = RoundedCornerShape(18.dp)
     Column(
@@ -433,7 +459,9 @@ private fun StudentsCard(
                 student = student,
                 text = inputs[student.id].orEmpty(),
                 isError = error != null,
-                onValueChange = { onValueChange(student.id, it) }
+                hasFeedback = student.id in withFeedback,
+                onValueChange = { onValueChange(student.id, it) },
+                onOpenFeedback = { onOpenFeedback(student) }
             )
             if (error != null) GradeErrorLine(message = error)
             if (index < students.lastIndex) HorizontalDivider(thickness = 1.dp, color = RowDivider)
@@ -446,7 +474,9 @@ private fun StudentGradeRow(
     student: EnrolledStudent,
     text: String,
     isError: Boolean,
+    hasFeedback: Boolean,
     onValueChange: (String) -> Unit,
+    onOpenFeedback: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -454,24 +484,42 @@ private fun StudentGradeRow(
             .heightIn(min = 68.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
+        // Tocar el nombre abre la retroalimentación (RF-13); la celda sigue siendo para la nota.
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .background(PrimarySoft, CircleShape),
-            contentAlignment = Alignment.Center
+                .weight(1f)
+                .heightIn(min = 56.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClickLabel = "Comentar", onClick = onOpenFeedback),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = student.initials,
-                style = TextStyle(fontFamily = InterFontFamily, fontWeight = FontWeight.Bold, fontSize = 13.sp),
-                color = NotiaPrimary
-            )
+            StudentAvatar(initials = student.initials)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(text = student.name, style = MaterialTheme.typography.titleMedium, color = NotiaInk)
+                Spacer(modifier = Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = student.code, style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
+                    if (hasFeedback) {
+                        Text(text = " · ", style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
+                        Icon(
+                            painter = painterResource(R.drawable.ic_comment),
+                            contentDescription = null,
+                            tint = NotiaPrimary,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Con comentario",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = NotiaPrimary
+                        )
+                    }
+                }
+            }
         }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = student.name, style = MaterialTheme.typography.titleMedium, color = NotiaInk)
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(text = student.code, style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
-        }
+        Spacer(modifier = Modifier.width(8.dp))
         GradeCell(
             text = text,
             isError = isError,
