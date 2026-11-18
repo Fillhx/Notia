@@ -5,5 +5,5 @@ import co.edu.univalle.notia.core.ui.PlaceholderScreen
 
 @Composable
 fun StudentScreen() {
-    PlaceholderScreen(title = "Estudiante", requirements = "RF-13, RF-14, RF-15, RF-16, RF-18")
+    PlaceholderScreen(title = "Estudiante", requirements = "RF-14, RF-15, RF-16, RF-18")
 }
