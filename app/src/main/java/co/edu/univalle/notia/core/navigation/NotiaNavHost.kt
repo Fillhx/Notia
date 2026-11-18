@@ -92,7 +92,7 @@ fun NotiaNavHost() {
             )
         }
         composable(Routes.COORDINATOR) { CoordinatorScreen() }
-        composable(Routes.TEACHER) { TeacherScreen() }
+        composable(Routes.TEACHER) { TeacherScreen(onBack = { nav.popBackStack() }) }
         composable(Routes.STUDENT) { StudentScreen() }
     }
 }
