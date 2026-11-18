@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberData(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    function hasCoordinatorRole(orgId) {
+      return signedIn() && memberData(orgId).data.rol == 'Coordinación';
+    }
+
+    function belongsToOrganization(orgId) {
+      return signedIn() && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
+    }
+
+    match /users/{uid} {
+      allow read, create, update: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /organizations/{orgId} {
+      allow read: if belongsToOrganization(orgId);
+      allow create: if signedIn();
+      allow update, delete: if hasCoordinatorRole(orgId);
+
+      match /members/{uid} {
+        allow read: if belongsToOrganization(orgId);
+        allow create: if hasCoordinatorRole(orgId) || request.auth.uid == uid;
+        allow update: if hasCoordinatorRole(orgId);
+        allow delete: if hasCoordinatorRole(orgId) && uid != request.auth.uid;
+      }
+
+      match /periods/{periodId} {
+        allow read: if belongsToOrganization(orgId);
+        allow create, update: if hasCoordinatorRole(orgId);
+        allow delete: if hasCoordinatorRole(orgId)
+          && (!('subjectCount' in resource.data) || resource.data.subjectCount == 0);
+      }
+
+      match /subjects/{subjectId} {
+        allow read: if belongsToOrganization(orgId);
+        allow create, update: if hasCoordinatorRole(orgId);
+        allow delete: if hasCoordinatorRole(orgId)
+          && (!('gradesCount' in resource.data) || resource.data.gradesCount == 0);
+
+        match /activities/{activityId} {
+          allow read: if belongsToOrganization(orgId);
+          allow write: if hasCoordinatorRole(orgId);
+        }
+
+        match /grades/{gradeId} {
+          allow read: if belongsToOrganization(orgId);
+          allow write: if hasCoordinatorRole(orgId);
+        }
+
+        match /history/{historyId} {
+          allow read: if belongsToOrganization(orgId);
+          allow create: if hasCoordinatorRole(orgId);
+        }
+      }
+    }
+  }
+}
