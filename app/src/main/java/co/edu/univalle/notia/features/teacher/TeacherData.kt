@@ -85,6 +85,13 @@ object FakeTeacherRepository {
         "final" to mutableMapOf(),
     )
 
+    /** feedback[activityId][studentId] (RF-13) */
+    private val feedback: MutableMap<String, MutableMap<String, String>> = mutableMapOf(
+        "p2" to mutableMapOf(
+            "s1" to "Buen manejo de corrutinas y del estado de la pantalla. Te faltó mostrar un mensaje cuando no hay conexión."
+        ),
+    )
+
     private val history = mutableListOf<GradeChange>()
     private var nextActivityNumber = 1
 
@@ -102,6 +109,15 @@ object FakeTeacherRepository {
 
     fun history(subjectId: String): List<GradeChange> = history.toList()
 
+    fun feedback(subjectId: String, activityId: String): Map<String, String> =
+        feedback[activityId].orEmpty().toMap()
+
+    /** Guarda o quita (`text = null`) la retroalimentación de un estudiante en una actividad (RF-13). */
+    fun saveFeedback(subjectId: String, activityId: String, studentId: String, text: String?) {
+        val target = feedback.getOrPut(activityId) { mutableMapOf() }
+        if (text == null) target.remove(studentId) else target[studentId] = text
+    }
+
     fun gradeCount(subjectId: String, activityId: String): Int = grades[activityId]?.size ?: 0
 
     /**
@@ -114,6 +130,7 @@ object FakeTeacherRepository {
         activities.filter { it.id !in keptIds }.forEach { removed ->
             check(gradeCount(subjectId, removed.id) == 0) { "${removed.name} tiene notas y no se puede eliminar" }
             grades.remove(removed.id)
+            feedback.remove(removed.id)
         }
         val updated = entries.map { entry ->
             if (entry.id == null) {
