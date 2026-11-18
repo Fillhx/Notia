@@ -53,13 +53,17 @@ data class GradeChange(
  */
 object FakeTeacherRepository {
     const val DEMO_SUBJECT_ID = "prog-movil"
+    private const val WEB_SUBJECT_ID = "desarrollo-web"
     const val CURRENT_TEACHER = "Laura Gómez"
+    const val ORGANIZATION_NAME = "Curso de Programación"
+    const val PERIOD_NAME = "2026-II"
 
-    private val subjects = mapOf(
-        DEMO_SUBJECT_ID to TeacherSubject(DEMO_SUBJECT_ID, "Programación Móvil", "Curso de Programación", "2026-II")
+    private val subjects = linkedMapOf(
+        DEMO_SUBJECT_ID to TeacherSubject(DEMO_SUBJECT_ID, "Programación Móvil", ORGANIZATION_NAME, PERIOD_NAME),
+        WEB_SUBJECT_ID to TeacherSubject(WEB_SUBJECT_ID, "Desarrollo Web", ORGANIZATION_NAME, PERIOD_NAME),
     )
 
-    private val students = listOf(
+    private val allStudents = listOf(
         EnrolledStudent("s1", "Ana Castaño", "2380412"),
         EnrolledStudent("s2", "Brayan Mejía", "2380377"),
         EnrolledStudent("s3", "Camila Rojas", "2380590"),
@@ -70,13 +74,29 @@ object FakeTeacherRepository {
         EnrolledStudent("s8", "Isabela Muñoz", "2380502"),
         EnrolledStudent("s9", "Juan Pablo Ríos", "2380188"),
         EnrolledStudent("s10", "Laura Cardona", "2380634"),
+        EnrolledStudent("s11", "Mateo Salazar", "2380711"),
+        EnrolledStudent("s12", "Natalia Ospina", "2380745"),
     )
 
-    private val activities = mutableListOf(
-        GradeActivity("p1", "Parcial 1", 25, ActivityStatus.PUBLISHED),
-        GradeActivity("taller", "Taller", 15, ActivityStatus.PUBLISHED),
-        GradeActivity("p2", "Parcial 2", 30, ActivityStatus.DRAFT),
-        GradeActivity("final", "Examen final", 30, ActivityStatus.DRAFT),
+    private val studentsBySubject = mapOf(
+        DEMO_SUBJECT_ID to allStudents.take(10),
+        WEB_SUBJECT_ID to allStudents.drop(4),
+    )
+
+    /** Ids de actividad únicos entre materias: las notas y comentarios se guardan por actividad. */
+    private val activitiesBySubject = mutableMapOf(
+        DEMO_SUBJECT_ID to mutableListOf(
+            GradeActivity("p1", "Parcial 1", 25, ActivityStatus.PUBLISHED),
+            GradeActivity("taller", "Taller", 15, ActivityStatus.PUBLISHED),
+            GradeActivity("p2", "Parcial 2", 30, ActivityStatus.DRAFT),
+            GradeActivity("final", "Examen final", 30, ActivityStatus.DRAFT),
+        ),
+        // Esquema incompleto a propósito (85 %), como en el Figma "11. Docente · Mis materias".
+        WEB_SUBJECT_ID to mutableListOf(
+            GradeActivity("web-p1", "Parcial 1", 30, ActivityStatus.DRAFT),
+            GradeActivity("web-taller", "Taller", 25, ActivityStatus.DRAFT),
+            GradeActivity("web-proyecto", "Proyecto", 30, ActivityStatus.DRAFT),
+        ),
     )
 
     /** grades[activityId][studentId] */
@@ -115,18 +135,24 @@ object FakeTeacherRepository {
     }
 
     private fun seed(vararg values: String): MutableMap<String, BigDecimal> =
-        students.zip(values).associate { (student, value) -> student.id to BigDecimal(value) }.toMutableMap()
+        allStudents.zip(values).associate { (student, value) -> student.id to BigDecimal(value) }.toMutableMap()
+
+    /** Materias que dicta el docente en la organización (las asigna Coordinación, RF-08). */
+    fun subjects(): List<TeacherSubject> = subjects.values.toList()
 
     fun subject(subjectId: String): TeacherSubject = subjects.getValue(subjectId)
 
-    fun students(subjectId: String): List<EnrolledStudent> = students
+    fun students(subjectId: String): List<EnrolledStudent> = studentsBySubject.getValue(subjectId)
 
-    fun activities(subjectId: String): List<GradeActivity> = activities.toList()
+    fun activities(subjectId: String): List<GradeActivity> = activitiesBySubject.getValue(subjectId).toList()
 
     fun grades(subjectId: String, activityId: String): Map<String, BigDecimal> =
         grades[activityId].orEmpty().toMap()
 
-    fun history(subjectId: String): List<GradeChange> = history.toList()
+    fun history(subjectId: String): List<GradeChange> {
+        val ids = activitiesBySubject.getValue(subjectId).map { it.id }.toSet()
+        return history.filter { it.activityId in ids }
+    }
 
     fun feedback(subjectId: String, activityId: String): Map<String, String> =
         feedback[activityId].orEmpty().toMap()
@@ -145,6 +171,7 @@ object FakeTeacherRepository {
      */
     fun saveScheme(subjectId: String, entries: List<SchemeEntry>) {
         require(entries.sumOf { it.percentage } == 100) { "RN-03: el esquema debe sumar 100 %" }
+        val activities = activitiesBySubject.getValue(subjectId)
         val keptIds = entries.mapNotNull { it.id }.toSet()
         activities.filter { it.id !in keptIds }.forEach { removed ->
             check(gradeCount(subjectId, removed.id) == 0) { "${removed.name} tiene notas y no se puede eliminar" }
@@ -169,6 +196,7 @@ object FakeTeacherRepository {
     }
 
     fun publish(subjectId: String, activityId: String) {
+        val activities = activitiesBySubject.getValue(subjectId)
         val index = activities.indexOfFirst { it.id == activityId }
         activities[index] = activities[index].copy(status = ActivityStatus.PUBLISHED)
     }
@@ -186,7 +214,7 @@ object FakeTeacherRepository {
         applyGrades(activityId, values)
     }
 
-    private fun activity(activityId: String) = activities.first { it.id == activityId }
+    private fun activity(activityId: String) = activitiesBySubject.values.flatten().first { it.id == activityId }
 
     /** 4.5 y 4.50 son la misma nota; por eso compareTo y no equals. */
     private fun sameGrade(a: BigDecimal?, b: BigDecimal?): Boolean =

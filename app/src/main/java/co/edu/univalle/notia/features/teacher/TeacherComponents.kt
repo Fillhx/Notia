@@ -48,6 +48,7 @@ internal val CellBorder = Color(0xFFD6D2C7)
 internal val RowDivider = Color(0xFFEFECE5)
 internal val EmptyDash = Color(0xFF7A8191)
 internal val DisabledText = Color(0xFF9AA0AB)
+internal val ProgressTrack = Color(0xFFECE9E1)
 
 internal val SectionLabelStyle = TextStyle(
     fontFamily = InterFontFamily,
