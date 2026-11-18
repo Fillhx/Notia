@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícono de Figma "Notia · Diseño inicial" (pantalla 5. Docente). Color con tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="14dp"
+    android:height="14dp"
+    android:viewportWidth="14"
+    android:viewportHeight="14">
+    <path
+        android:pathData="M1.5,7C1.5,7 3.5,3 7,3C10.5,3 12.5,7 12.5,7C12.5,7 10.5,11 7,11C3.5,11 1.5,7 1.5,7Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#FF000000" />
+    <path
+        android:pathData="M7,8.6C7.88366,8.6 8.6,7.88366 8.6,7C8.6,6.11634 7.88366,5.4 7,5.4C6.11634,5.4 5.4,6.11634 5.4,7C5.4,7.88366 6.11634,8.6 7,8.6Z"
+        android:fillColor="#FF000000" />
+</vector>
