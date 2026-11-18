@@ -163,7 +163,7 @@ private sealed interface PendingDialog {
     data object Publish : PendingDialog
     data object SavePublished : PendingDialog
     data class DiscardAndSwitch(val activityId: String) : PendingDialog
-    data object DiscardAndOpenScheme : PendingDialog
+    data class DiscardAndLeave(val then: () -> Unit) : PendingDialog
 }
 
 /** RF-11, RF-12, RNF-06 · Figma "5. Docente · Registro de notas". */
@@ -172,6 +172,7 @@ fun GradeEntryScreen(
     subjectId: String,
     onBack: () -> Unit,
     onEditScheme: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
 ) {
     val state = remember(subjectId) { GradeEntryState(FakeTeacherRepository, subjectId) }
     var dialog by remember { mutableStateOf<PendingDialog?>(null) }
@@ -206,12 +207,13 @@ fun GradeEntryScreen(
         }
     }
 
-    fun openScheme() {
+    /** Salir a otra pantalla del docente: el borrador se guarda; cambios publicados sin guardar se confirman. */
+    fun leaveTo(then: () -> Unit) {
         if (state.isPublished && state.isDirty) {
-            dialog = PendingDialog.DiscardAndOpenScheme
+            dialog = PendingDialog.DiscardAndLeave(then)
         } else {
             state.saveDraft()
-            onEditScheme()
+            then()
         }
     }
 
@@ -241,7 +243,8 @@ fun GradeEntryScreen(
                 selected = state.selected,
                 saveStatus = saveStatusText(state.isPublished, state.isDirty, state.lastSavedAt, now),
                 onSelect = ::switchActivity,
-                onEditScheme = ::openScheme
+                onEditScheme = { leaveTo(onEditScheme) },
+                onOpenHistory = { leaveTo(onOpenHistory) }
             )
             Spacer(modifier = Modifier.height(16.dp))
             StudentsHeader(count = state.students.size)
@@ -305,11 +308,11 @@ fun GradeEntryScreen(
             onConfirm = { state.load(current.activityId); dialog = null },
             onDismiss = { dialog = null }
         )
-        PendingDialog.DiscardAndOpenScheme -> ConfirmDialog(
+        is PendingDialog.DiscardAndLeave -> ConfirmDialog(
             title = "¿Descartar cambios?",
             text = "Hay cambios sin guardar en ${state.selected.name}.",
             confirmLabel = "Descartar",
-            onConfirm = { dialog = null; onEditScheme() },
+            onConfirm = { dialog = null; current.then() },
             onDismiss = { dialog = null }
         )
         null -> Unit
@@ -335,6 +338,7 @@ private fun ActivityCard(
     saveStatus: String,
     onSelect: (String) -> Unit,
     onEditScheme: () -> Unit,
+    onOpenHistory: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(18.dp)
@@ -417,6 +421,28 @@ private fun ActivityCard(
                 onClick = {
                     expanded = false
                     onEditScheme()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Ver historial de cambios",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NotiaPrimary
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_clock),
+                        contentDescription = null,
+                        tint = NotiaPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onOpenHistory()
                 }
             )
         }

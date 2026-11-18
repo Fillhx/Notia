@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reloj para "Ver historial de cambios" (mismo trazo que los íconos del Figma). Color con tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16">
+    <path
+        android:pathData="M8,2A6,6 0,1 1,8 14A6,6 0,1 1,8 2Z"
+        android:strokeWidth="1.6"
+        android:strokeColor="#FF000000" />
+    <path
+        android:pathData="M8,5V8L10,9.5"
+        android:strokeWidth="1.6"
+        android:strokeColor="#FF000000"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
