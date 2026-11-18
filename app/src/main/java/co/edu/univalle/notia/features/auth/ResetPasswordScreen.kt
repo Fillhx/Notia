@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.LinkOff
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -168,14 +167,10 @@ private fun ResetPasswordFormContent(
 
     val coroutineScope = rememberCoroutineScope()
 
-    val hasMinLength = password.length >= 8
-    val hasUppercase = password.any { it.isUpperCase() }
-    val hasNumber = password.any { it.isDigit() }
-
     fun handleSavePassword() {
         var hasError = false
 
-        if (!(hasMinLength && hasUppercase && hasNumber)) {
+        if (!isValidPassword(password)) {
             passwordError = "La contraseña no cumple los requisitos"
             hasError = true
         } else {
@@ -230,22 +225,7 @@ private fun ResetPasswordFormContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            RequirementRow(
-                text = "Mínimo 8 caracteres",
-                isMet = hasMinLength
-            )
-            RequirementRow(
-                text = "Al menos una letra mayúscula",
-                isMet = hasUppercase
-            )
-            RequirementRow(
-                text = "Al menos un número",
-                isMet = hasNumber
-            )
-        }
+        PasswordRequirementsList(password = password)
     }
 
     Spacer(modifier = Modifier.height(16.dp))
@@ -269,29 +249,6 @@ private fun ResetPasswordFormContent(
         onClick = { handleSavePassword() },
         loading = loading
     )
-}
-
-@Composable
-private fun RequirementRow(
-    text: String,
-    isMet: Boolean
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Icon(
-            imageVector = if (isMet) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-            contentDescription = null,
-            tint = if (isMet) SuccessText else NotiaTextSecondary,
-            modifier = Modifier.size(16.dp)
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isMet) SuccessText else NotiaTextSecondary
-        )
-    }
 }
 
 @Composable

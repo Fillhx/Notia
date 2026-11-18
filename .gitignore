@@ -32,3 +32,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Configuración personal (IDE y Claude Code)
+.vscode/
+.claude/

@@ -96,8 +96,8 @@ fun RegisterScreen(
             emailError = null
         }
 
-        if (password.length < 8) {
-            passwordError = "La contraseña debe tener mínimo 8 caracteres"
+        if (!isValidPassword(password)) {
+            passwordError = "La contraseña no cumple los requisitos"
             hasError = true
         } else {
             passwordError = null
@@ -190,14 +190,8 @@ fun RegisterScreen(
                 isError = passwordError != null,
                 errorMessage = passwordError
             )
-            if (passwordError == null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Mínimo 8 caracteres",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NotiaTextSecondary
-                )
-            }
+            Spacer(modifier = Modifier.height(8.dp))
+            PasswordRequirementsList(password = password)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
