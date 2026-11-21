@@ -28,9 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.viewmodel.compose.viewModel
 import co.edu.univalle.notia.core.ui.NotiaBackButton
 import co.edu.univalle.notia.core.ui.NotiaPrimaryButton
 import co.edu.univalle.notia.core.ui.NotiaTextField
@@ -52,27 +53,25 @@ import co.edu.univalle.notia.ui.theme.NotiaTextSecondary
 import co.edu.univalle.notia.ui.theme.NotiaTheme
 import co.edu.univalle.notia.ui.theme.SuccessBg
 import co.edu.univalle.notia.ui.theme.SuccessText
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 @Composable
 fun RegisterScreen(
     onBack: () -> Unit,
-    onRegistered: () -> Unit
+    onRegistered: () -> Unit,
+    viewModel: AuthViewModel = viewModel()
 ) {
+    val state by viewModel.state.collectAsState()
+
     var name by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
-    var loading by rememberSaveable { mutableStateOf(false) }
     var showSuccessDialog by rememberSaveable { mutableStateOf(false) }
 
     var nameError by rememberSaveable { mutableStateOf<String?>(null) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
     var passwordError by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmPasswordError by rememberSaveable { mutableStateOf<String?>(null) }
-
-    val coroutineScope = rememberCoroutineScope()
 
     fun handleRegister() {
         var hasError = false
@@ -111,10 +110,7 @@ fun RegisterScreen(
         }
 
         if (!hasError) {
-            loading = true
-            coroutineScope.launch {
-                delay(1000)
-                loading = false
+            viewModel.register(trimmedName, trimmedEmail, password) {
                 showSuccessDialog = true
             }
         }
@@ -156,6 +152,7 @@ fun RegisterScreen(
             onValueChange = {
                 name = it
                 nameError = null
+                viewModel.clearError()
             },
             label = "Nombre completo",
             isError = nameError != null,
@@ -169,11 +166,12 @@ fun RegisterScreen(
             onValueChange = {
                 email = it
                 emailError = null
+                viewModel.clearError()
             },
             label = "Correo electrónico",
             keyboardType = KeyboardType.Email,
-            isError = emailError != null,
-            errorMessage = emailError
+            isError = emailError != null || state.error != null,
+            errorMessage = emailError ?: state.error
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -184,6 +182,7 @@ fun RegisterScreen(
                 onValueChange = {
                     password = it
                     passwordError = null
+                    viewModel.clearError()
                 },
                 label = "Contraseña",
                 isPassword = true,
@@ -201,6 +200,7 @@ fun RegisterScreen(
             onValueChange = {
                 confirmPassword = it
                 confirmPasswordError = null
+                viewModel.clearError()
             },
             label = "Confirmar contraseña",
             isPassword = true,
@@ -213,7 +213,7 @@ fun RegisterScreen(
         NotiaPrimaryButton(
             text = "Crear cuenta",
             onClick = { handleRegister() },
-            loading = loading
+            loading = state.loading
         )
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -274,7 +274,7 @@ fun RegisterScreen(
             },
             text = {
                 Text(
-                    text = "Te enviamos un correo de bienvenida a ${email.trim()}.",
+                    text = "Te enviamos un enlace de verificación a ${email.trim()}. Confírmalo para poder ingresar.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = NotiaTextSecondary,
                     textAlign = TextAlign.Center

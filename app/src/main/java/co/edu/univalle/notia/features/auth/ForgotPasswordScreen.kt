@@ -2,7 +2,6 @@ package co.edu.univalle.notia.features.auth
 
 import android.util.Patterns
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -29,9 +27,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import co.edu.univalle.notia.core.ui.NotiaBackButton
 import co.edu.univalle.notia.core.ui.NotiaPrimaryButton
 import co.edu.univalle.notia.core.ui.NotiaTextField
@@ -53,20 +52,17 @@ import co.edu.univalle.notia.ui.theme.NotiaPaper
 import co.edu.univalle.notia.ui.theme.NotiaPrimary
 import co.edu.univalle.notia.ui.theme.NotiaTextSecondary
 import co.edu.univalle.notia.ui.theme.NotiaTheme
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 @Composable
 fun ForgotPasswordScreen(
     onBack: () -> Unit,
-    onOpenResetLink: (expired: Boolean) -> Unit = {}
+    viewModel: AuthViewModel = viewModel()
 ) {
+    val state by viewModel.state.collectAsState()
+
     var emailSent by rememberSaveable { mutableStateOf(false) }
     var email by rememberSaveable { mutableStateOf("") }
-    var loading by rememberSaveable { mutableStateOf(false) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
-
-    val coroutineScope = rememberCoroutineScope()
 
     fun handleSendLink() {
         val trimmedEmail = email.trim()
@@ -76,12 +72,7 @@ fun ForgotPasswordScreen(
             emailError = "El correo no tiene un formato válido"
         } else {
             emailError = null
-            loading = true
-            coroutineScope.launch {
-                delay(1000)
-                loading = false
-                emailSent = true
-            }
+            viewModel.sendPasswordReset(trimmedEmail) { emailSent = true }
         }
     }
 
@@ -123,11 +114,12 @@ fun ForgotPasswordScreen(
                 onValueChange = {
                     email = it
                     emailError = null
+                    viewModel.clearError()
                 },
                 label = "Correo electrónico",
                 keyboardType = KeyboardType.Email,
-                isError = emailError != null,
-                errorMessage = emailError
+                isError = emailError != null || state.error != null,
+                errorMessage = emailError ?: state.error
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -135,7 +127,7 @@ fun ForgotPasswordScreen(
             NotiaPrimaryButton(
                 text = "Enviar enlace",
                 onClick = { handleSendLink() },
-                loading = loading
+                loading = state.loading
             )
         } else {
             // ESTADO B — Enlace enviado
@@ -172,7 +164,7 @@ fun ForgotPasswordScreen(
 
             Text(
                 text = buildAnnotatedString {
-                    append("Enviamos un enlace de recuperación a ")
+                    append("Si existe una cuenta con ese correo, enviamos un enlace de recuperación a ")
                     withStyle(
                         style = SpanStyle(
                             fontWeight = FontWeight.SemiBold,
@@ -209,7 +201,7 @@ fun ForgotPasswordScreen(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "El enlace es de un solo uso y expira en 15 minutos.",
+                        text = "El enlace es de un solo uso y expira pasado un tiempo. Revisa también la carpeta de spam.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF8A5A00)
                     )
@@ -222,42 +214,6 @@ fun ForgotPasswordScreen(
                 text = "Volver al ingreso",
                 onClick = onBack
             )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .heightIn(min = 44.dp)
-                        .clickable { onOpenResetLink(false) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "[demo] Abrir enlace del correo",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NotiaTextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .heightIn(min = 44.dp)
-                        .clickable { onOpenResetLink(true) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "[demo] Abrir enlace expirado",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = NotiaTextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
