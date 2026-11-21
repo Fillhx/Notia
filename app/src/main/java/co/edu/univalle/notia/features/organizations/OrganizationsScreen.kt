@@ -1,13 +1,17 @@
 package co.edu.univalle.notia.features.organizations
 
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.compose.viewModel
 import co.edu.univalle.notia.core.ui.PlaceholderScreen
+import co.edu.univalle.notia.features.auth.AuthViewModel
 
 @Composable
 fun OrganizationsScreen(
     onEnterAsCoordinator: () -> Unit,
     onEnterAsTeacher: () -> Unit,
     onEnterAsStudent: () -> Unit,
+    onLoggedOut: () -> Unit,
+    viewModel: AuthViewModel = viewModel(),
 ) {
     PlaceholderScreen(
         title = "Organizaciones",
@@ -17,6 +21,7 @@ fun OrganizationsScreen(
             "[demo] Coordinación" to onEnterAsCoordinator,
             "[demo] Docente" to onEnterAsTeacher,
             "[demo] Estudiante" to onEnterAsStudent,
+            "Cerrar sesión" to { viewModel.logout(); onLoggedOut() },
         ),
     )
 }

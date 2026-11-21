@@ -28,9 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import co.edu.univalle.notia.core.ui.NotiaPrimaryButton
 import co.edu.univalle.notia.core.ui.NotiaTextField
 import co.edu.univalle.notia.ui.theme.NotiaAccent
@@ -48,22 +49,20 @@ import co.edu.univalle.notia.ui.theme.NotiaPaper
 import co.edu.univalle.notia.ui.theme.NotiaPrimary
 import co.edu.univalle.notia.ui.theme.NotiaTextSecondary
 import co.edu.univalle.notia.ui.theme.NotiaTheme
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
     onLoggedIn: () -> Unit,
     onForgotPassword: () -> Unit = {},
-    onCreateAccount: () -> Unit = {}
+    onCreateAccount: () -> Unit = {},
+    viewModel: AuthViewModel = viewModel()
 ) {
+    val state by viewModel.state.collectAsState()
+
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
-    var loading by rememberSaveable { mutableStateOf(false) }
     var emailError by rememberSaveable { mutableStateOf<String?>(null) }
     var passwordError by rememberSaveable { mutableStateOf<String?>(null) }
-
-    val coroutineScope = rememberCoroutineScope()
 
     fun handleLogin() {
         var hasError = false
@@ -87,12 +86,7 @@ fun LoginScreen(
         }
 
         if (!hasError) {
-            loading = true
-            coroutineScope.launch {
-                delay(1000)
-                loading = false
-                onLoggedIn()
-            }
+            viewModel.login(trimmedEmail, password, onLoggedIn)
         }
     }
 
@@ -160,6 +154,7 @@ fun LoginScreen(
             onValueChange = {
                 email = it
                 emailError = null
+                viewModel.clearError()
             },
             label = "Correo electrónico",
             keyboardType = KeyboardType.Email,
@@ -175,11 +170,12 @@ fun LoginScreen(
             onValueChange = {
                 password = it
                 passwordError = null
+                viewModel.clearError()
             },
             label = "Contraseña",
             isPassword = true,
-            isError = passwordError != null,
-            errorMessage = passwordError
+            isError = passwordError != null || state.error != null,
+            errorMessage = passwordError ?: state.error
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -210,7 +206,7 @@ fun LoginScreen(
         NotiaPrimaryButton(
             text = "Ingresar",
             onClick = { handleLogin() },
-            loading = loading
+            loading = state.loading
         )
 
         Spacer(modifier = Modifier.height(32.dp))

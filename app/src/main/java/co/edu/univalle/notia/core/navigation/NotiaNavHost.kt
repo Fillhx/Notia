@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.google.firebase.auth.FirebaseAuth
 import co.edu.univalle.notia.features.auth.ForgotPasswordScreen
 import co.edu.univalle.notia.features.auth.LoginScreen
 import co.edu.univalle.notia.features.auth.RegisterScreen
@@ -32,8 +33,9 @@ object Routes {
 @Composable
 fun NotiaNavHost() {
     val nav = rememberNavController()
+    val startDestination = if (FirebaseAuth.getInstance().currentUser != null) Routes.ORGANIZATIONS else Routes.LOGIN
 
-    NavHost(navController = nav, startDestination = Routes.LOGIN) {
+    NavHost(navController = nav, startDestination = startDestination) {
         composable(Routes.LOGIN) {
             LoginScreen(
                 onLoggedIn = {
@@ -48,20 +50,11 @@ fun NotiaNavHost() {
         composable(Routes.REGISTER) {
             RegisterScreen(
                 onBack = { nav.popBackStack() },
-                onRegistered = {
-                    nav.navigate(Routes.ORGANIZATIONS) {
-                        popUpTo(Routes.LOGIN) { inclusive = true }
-                    }
-                }
+                onRegistered = { nav.popBackStack() }
             )
         }
         composable(Routes.FORGOT_PASSWORD) {
-            ForgotPasswordScreen(
-                onBack = { nav.popBackStack() },
-                onOpenResetLink = { expired ->
-                    nav.navigate("reset_password/$expired")
-                }
-            )
+            ForgotPasswordScreen(onBack = { nav.popBackStack() })
         }
         composable(
             route = "reset_password/{expired}",
@@ -89,6 +82,11 @@ fun NotiaNavHost() {
                 onEnterAsCoordinator = { nav.navigate(Routes.COORDINATOR) },
                 onEnterAsTeacher = { nav.navigate(Routes.TEACHER) },
                 onEnterAsStudent = { nav.navigate(Routes.STUDENT) },
+                onLoggedOut = {
+                    nav.navigate(Routes.LOGIN) {
+                        popUpTo(Routes.ORGANIZATIONS) { inclusive = true }
+                    }
+                }
             )
         }
         composable(Routes.COORDINATOR) { CoordinatorScreen() }
