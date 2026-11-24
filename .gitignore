@@ -36,3 +36,6 @@ google-services.json
 # Configuración personal (IDE y Claude Code)
 .vscode/
 .claude/
+
+# env
+.env

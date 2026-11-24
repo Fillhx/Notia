@@ -65,7 +65,7 @@ También se puede compilar desde la terminal:
 
 | Nombre | Código |
 |---|---|
-| Santiago Velásquez Bedoya | 2380378 |
-| Gustavo Adolfo Restrepo Muñoz | 2380618 |
-| Santiago Hernández Aguado | 2380367 |
-| Nicolás Chaparro Gonzales | 2380530 |
+| Santiago Velásquez Bedoya | 2380378-3743 |
+| Gustavo Adolfo Restrepo Muñoz | 2380618-3743 |
+| Santiago Hernández Aguado | 2380367-3743 |
+| Nicolás Chaparro González | 2380530-3743 |
