@@ -29,6 +29,22 @@ interface TeacherRepository {
     suspend fun saveDraft(subjectId: String, activityId: String, values: Map<String, BigDecimal?>)
     suspend fun publishActivity(subjectId: String, activityId: String, values: Map<String, BigDecimal?>)
     suspend fun updatePublishedGrades(subjectId: String, activityId: String, values: Map<String, BigDecimal?>)
+
+    // Dentro de interface TeacherRepository:
+    suspend fun createActivity(
+        subjectId: String,
+        name: String,
+        percentage: Int,
+        status: ActivityStatus = ActivityStatus.DRAFT,
+    ): GradeActivity
+
+    suspend fun updateActivity(
+        subjectId: String,
+        activityId: String,
+        name: String,
+        percentage: Int,
+        status: ActivityStatus,
+    ): GradeActivity
 }
 
 data class TeacherSubjectWorkspace(
@@ -355,6 +371,204 @@ class FirestoreTeacherRepository(
     } catch (_: Exception) {
         emptyMap()
     }
+
+    override suspend fun createActivity(
+        subjectId: String,
+        name: String,
+        percentage: Int,
+        status: ActivityStatus,
+    ): GradeActivity = guarded {
+        val s = session()
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            throw TeacherRepositoryException("Ingresa el nombre de la actividad.")
+        }
+        if (percentage !in 1..100) {
+            throw TeacherRepositoryException("El porcentaje debe estar entre 1 y 100.")
+        }
+
+        val subRef = subjectRef(s.orgId, subjectId)
+        val subSnap = subRef.get().awaitTask()
+        if (!subSnap.exists()) {
+            throw TeacherRepositoryException("La materia no existe.")
+        }
+
+        val existingActivities = subRef.collection("activities").get().awaitTask().documents
+        val currentTotal = existingActivities.sumOf { doc ->
+            val d = doc.data.orEmpty()
+            parsePercentage(d["porcentaje"] ?: d["percentage"]) ?: 0
+        }
+        if (currentTotal + percentage > 100) {
+            val available = (100 - currentTotal).coerceAtLeast(0)
+            throw TeacherRepositoryException(
+                if (available == 0) {
+                    "Las actividades ya suman 100 %. Reduce el porcentaje de otra actividad antes de agregar una nueva."
+                } else {
+                    "La suma de porcentajes superaría el 100 % (actual: $currentTotal %, disponible:$available %)."
+                }
+            )
+        }
+
+        val subData = subSnap.data.orEmpty()
+        val subjectName = subData.text("nombre", "name") ?: "Materia"
+        val studentIds = (subData["studentIds"] as? Collection<*>)
+            ?.mapNotNull { (it as? String)?.trim()?.takeIf(String::isNotEmpty) }
+            ?.distinct()
+            .orEmpty()
+
+        val now = Timestamp.now()
+        val rawStatus = if (status == ActivityStatus.PUBLISHED) "publicada" else "borrador"
+        val actRef = subRef.collection("activities").document()
+        val gradesCol = subRef.collection("grades")
+        val noticesCol = orgRef(s.orgId).collection("notices")
+
+        val batch = db.batch()
+        batch.set(
+            actRef,
+            mapOf(
+                "nombre" to cleanName,
+                "porcentaje" to percentage,
+                "estado" to rawStatus,
+                "actualizadoEn" to now,
+            )
+        )
+
+        studentIds.forEach { studentId ->
+            val gradeRef = gradesCol.document("${actRef.id}_${studentId}")
+            batch.set(
+                gradeRef,
+                mapOf(
+                    "studentId" to studentId,
+                    "activityId" to actRef.id,
+                    "estado" to rawStatus,
+                    "actualizadoEn" to now,
+                ),
+                SetOptions.merge()
+            )
+            if (status == ActivityStatus.PUBLISHED) {
+                batch.set(
+                    noticesCol.document(),
+                    mapOf(
+                        "studentId" to studentId,
+                        "subjectId" to subjectId,
+                        "subjectName" to subjectName,
+                        "activityId" to actRef.id,
+                        "activityName" to cleanName,
+                        "type" to "grade_published",
+                        "createdAt" to now,
+                        "read" to false,
+                    )
+                )
+            }
+        }
+
+        batch.commit().awaitTask()
+        GradeActivity(
+            id = actRef.id,
+            name = cleanName,
+            percentage = percentage,
+            status = status,
+        )
+    }
+
+    override suspend fun updateActivity(
+        subjectId: String,
+        activityId: String,
+        name: String,
+        percentage: Int,
+        status: ActivityStatus,
+    ): GradeActivity = guarded {
+        val s = session()
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            throw TeacherRepositoryException("Ingresa el nombre de la actividad.")
+        }
+        if (percentage !in 1..100) {
+            throw TeacherRepositoryException("El porcentaje debe estar entre 1 y 100.")
+        }
+
+        val subRef = subjectRef(s.orgId, subjectId)
+        val actRef = subRef.collection("activities").document(activityId)
+        val subSnap = subRef.get().awaitTask()
+        val actSnap = actRef.get().awaitTask()
+        if (!actSnap.exists()) {
+            throw TeacherRepositoryException("La actividad no existe.")
+        }
+
+        val otherActivities = subRef.collection("activities").get().awaitTask().documents
+            .filter { it.id != activityId }
+        val otherTotal = otherActivities.sumOf { doc ->
+            val d = doc.data.orEmpty()
+            parsePercentage(d["porcentaje"] ?: d["percentage"]) ?: 0
+        }
+        if (otherTotal + percentage > 100) {
+            val available = (100 - otherTotal).coerceAtLeast(0)
+            throw TeacherRepositoryException(
+                "La suma de porcentajes superaría el 100 % (otras actividades: $otherTotal %, máximo disponible: $available %)."
+            )
+        }
+
+        val previousStatusRaw = actSnap.data.orEmpty().text("estado", "status")?.lowercase()
+        val wasPublished = previousStatusRaw == "publicada" || previousStatusRaw == "published"
+        val nowPublished = status == ActivityStatus.PUBLISHED
+        val newRawStatus = if (nowPublished) "publicada" else "borrador"
+        val subjectName = subSnap.data.orEmpty().text("nombre", "name") ?: "Materia"
+        val now = Timestamp.now()
+
+        val gradesSnap = subRef.collection("grades")
+            .whereEqualTo("activityId", activityId)
+            .get()
+            .awaitTask()
+        val noticesCol = orgRef(s.orgId).collection("notices")
+
+        val batch = db.batch()
+        batch.update(
+            actRef,
+            mapOf(
+                "nombre" to cleanName,
+                "porcentaje" to percentage,
+                "estado" to newRawStatus,
+                "actualizadoEn" to now,
+            )
+        )
+
+        gradesSnap.documents.forEach { gradeDoc ->
+            batch.update(
+                gradeDoc.reference,
+                mapOf(
+                    "estado" to newRawStatus,
+                    "actualizadoEn" to now,
+                )
+            )
+            if (!wasPublished && nowPublished) {
+                val studentId = gradeDoc.data.orEmpty().text("studentId")
+                if (studentId != null) {
+                    batch.set(
+                        noticesCol.document(),
+                        mapOf(
+                            "studentId" to studentId,
+                            "subjectId" to subjectId,
+                            "subjectName" to subjectName,
+                            "activityId" to activityId,
+                            "activityName" to cleanName,
+                            "type" to "grade_published",
+                            "createdAt" to now,
+                            "read" to false,
+                        )
+                    )
+                }
+            }
+        }
+
+        batch.commit().awaitTask()
+        GradeActivity(
+            id = activityId,
+            name = cleanName,
+            percentage = percentage,
+            status = status,
+        )
+    }
+
 
     private suspend fun resolveStudents(orgId: String, studentIds: List<String>): List<EnrolledStudent> {
         if (studentIds.isEmpty()) return emptyList()
