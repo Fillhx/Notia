@@ -27,7 +27,7 @@ import kotlinx.coroutines.CancellationException
 
 enum class StudentTab(val label: String, val icon: ImageVector, val placeholderText: String) {
     SUBJECTS("Materias", Icons.AutoMirrored.Filled.List, ""),
-    SIMULATOR("Simulador", Icons.Filled.Build, "Aquí podrás simular la nota que necesitas en tus actividades pendientes."),
+    SIMULATOR("Simulador", Icons.Filled.Build, ""),
     NOTICES("Avisos", Icons.Filled.Notifications, "Aquí verás las notas publicadas o editadas por tus docentes."),
     PROFILE("Perfil", Icons.Filled.Person, "Aquí verás tus datos de estudiante."),
 }
@@ -42,6 +42,7 @@ fun StudentScreen(
 ) {
     var tab by rememberSaveable { mutableStateOf(StudentTab.SUBJECTS) }
     var selectedSubjectId by rememberSaveable { mutableStateOf<String?>(null) }
+    var simulatorInputs by rememberSaveable { mutableStateOf(SimulatorInputs()) }
 
     val subjectsState by produceState<StudentLoadState<List<StudentSubjectGrades>>>(
         initialValue = StudentLoadState.Loading,
@@ -89,6 +90,12 @@ fun StudentScreen(
                         onSubjectClick = { selectedSubjectId = it },
                     )
                 }
+
+                StudentTab.SIMULATOR -> SimulatorScreen(
+                    state = subjectsState,
+                    inputs = simulatorInputs,
+                    onInputsChange = { simulatorInputs = it },
+                )
 
                 else -> PlaceholderScreen(tab)
             }
