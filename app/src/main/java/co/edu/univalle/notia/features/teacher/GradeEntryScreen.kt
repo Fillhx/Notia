@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -75,6 +77,7 @@ import co.edu.univalle.notia.ui.theme.NotiaTextSecondary
 import co.edu.univalle.notia.ui.theme.NotiaTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import java.math.BigDecimal
 
 // Colores del diseño (pantalla 5 y guía de estilo) que aún no están en ui/theme.
@@ -91,16 +94,24 @@ private const val AUTOSAVE_DELAY_MS = 1500L
 
 /** Estado de la pantalla de registro de notas de una materia. */
 private class GradeEntryState(
-    private val repo: FakeTeacherRepository,
+    private val repo: TeacherRepository,
     private val subjectId: String,
 ) {
-    val subject = repo.subject(subjectId)
-    val students = repo.students(subjectId)
-    var activities by mutableStateOf(repo.activities(subjectId))
+    var subject by mutableStateOf<TeacherSubject?>(null)
         private set
-    var selectedId by mutableStateOf(
-        activities.firstOrNull { it.status == ActivityStatus.DRAFT }?.id ?: activities.first().id
-    )
+    var students by mutableStateOf<List<EnrolledStudent>>(emptyList())
+        private set
+    var activities by mutableStateOf<List<GradeActivity>>(emptyList())
+        private set
+    private var gradesByActivity: Map<String, Map<String, BigDecimal>> = emptyMap()
+
+    var selectedId by mutableStateOf<String?>(null)
+        private set
+    var isLoading by mutableStateOf(true)
+        private set
+    var isSaving by mutableStateOf(false)
+        private set
+    var errorMessage by mutableStateOf<String?>(null)
         private set
 
     /** Texto de cada celda, por id de estudiante. */
@@ -109,20 +120,53 @@ private class GradeEntryState(
     var lastSavedAt by mutableStateOf<Long?>(null)
         private set
 
-    init {
-        load(selectedId)
+    val selected: GradeActivity?
+        get() = activities.firstOrNull { it.id == selectedId }
+    val isPublished: Boolean
+        get() = selected?.status == ActivityStatus.PUBLISHED
+    val parsed: Map<String, GradeInput>
+        get() = inputs.mapValues { parseGrade(it.value) }
+    val isDirty: Boolean
+        get() = inputs.toMap() != savedInputs
+    val hasErrors: Boolean
+        get() = parsed.values.any { it is GradeInput.Invalid }
+    val missingCount: Int
+        get() = parsed.values.count { it is GradeInput.Empty }
+
+    suspend fun loadWorkspace(preferredActivityId: String? = selectedId) {
+        isLoading = true
+        errorMessage = null
+        try {
+            val workspace = repo.loadSubjectWorkspace(subjectId)
+            subject = workspace.subject
+            students = workspace.students
+            activities = workspace.activities
+            gradesByActivity = workspace.gradesByActivity
+
+            val targetActivityId = preferredActivityId
+                ?.takeIf { id -> activities.any { it.id == id } }
+                ?: activities.firstOrNull { it.status == ActivityStatus.DRAFT }?.id
+                ?: activities.firstOrNull()?.id
+
+            if (targetActivityId != null) {
+                loadActivityInputs(targetActivityId)
+            } else {
+                selectedId = null
+                inputs.clear()
+                savedInputs = emptyMap()
+            }
+        } catch (e: Throwable) {
+            errorMessage = (e as? TeacherRepositoryException)?.message
+                ?: "No fue posible cargar la materia."
+        } finally {
+            isLoading = false
+        }
     }
 
-    val selected: GradeActivity get() = activities.first { it.id == selectedId }
-    val isPublished: Boolean get() = selected.status == ActivityStatus.PUBLISHED
-    val parsed: Map<String, GradeInput> get() = inputs.mapValues { parseGrade(it.value) }
-    val isDirty: Boolean get() = inputs.toMap() != savedInputs
-    val hasErrors: Boolean get() = parsed.values.any { it is GradeInput.Invalid }
-    val missingCount: Int get() = parsed.values.count { it is GradeInput.Empty }
-
-    fun load(activityId: String) {
+    fun loadActivityInputs(activityId: String) {
+        if (activities.none { it.id == activityId }) return
         selectedId = activityId
-        val grades = repo.grades(subjectId, activityId)
+        val grades = gradesByActivity[activityId].orEmpty()
         inputs.clear()
         students.forEach { inputs[it.id] = grades[it.id]?.toPlainString().orEmpty() }
         savedInputs = inputs.toMap()
@@ -138,23 +182,74 @@ private class GradeEntryState(
         }
     }.toMap()
 
-    fun saveDraft() {
-        if (isPublished) return
-        repo.saveDraft(subjectId, selectedId, gradesToSave())
-        savedInputs = inputs.toMap()
-        lastSavedAt = System.currentTimeMillis()
+    suspend fun saveDraft(): Boolean {
+        val currentActivity = selected ?: return false
+        if (isPublished || isSaving) return false
+        isSaving = true
+        errorMessage = null
+        return try {
+            val toSave = gradesToSave()
+            repo.saveDraft(subjectId, currentActivity.id, toSave)
+            val updatedGrades = gradesByActivity[currentActivity.id].orEmpty().toMutableMap()
+            toSave.forEach { (studentId, gradeValue) ->
+                if (gradeValue == null) updatedGrades.remove(studentId) else updatedGrades[studentId] = gradeValue
+            }
+            gradesByActivity = gradesByActivity + (currentActivity.id to updatedGrades)
+            savedInputs = inputs.toMap()
+            lastSavedAt = System.currentTimeMillis()
+            true
+        } catch (e: Throwable) {
+            errorMessage = (e as? TeacherRepositoryException)?.message
+                ?: "No se pudo guardar el borrador."
+            false
+        } finally {
+            isSaving = false
+        }
     }
 
-    fun publish() {
-        saveDraft()
-        repo.publish(subjectId, selectedId)
-        activities = repo.activities(subjectId)
+    suspend fun publish(): Boolean {
+        val currentActivity = selected ?: return false
+        if (isSaving) return false
+        isSaving = true
+        errorMessage = null
+        return try {
+            val toSave = gradesToSave()
+            repo.publishActivity(subjectId, currentActivity.id, toSave)
+            lastSavedAt = System.currentTimeMillis()
+            loadWorkspace(preferredActivityId = currentActivity.id)
+            true
+        } catch (e: Throwable) {
+            errorMessage = (e as? TeacherRepositoryException)?.message
+                ?: "No se pudieron publicar las notas."
+            false
+        } finally {
+            isSaving = false
+        }
     }
 
-    fun savePublishedChanges() {
-        repo.updatePublished(subjectId, selectedId, gradesToSave(), FakeTeacherRepository.CURRENT_TEACHER)
-        savedInputs = inputs.toMap()
-        lastSavedAt = System.currentTimeMillis()
+    suspend fun savePublishedChanges(): Boolean {
+        val currentActivity = selected ?: return false
+        if (isSaving) return false
+        isSaving = true
+        errorMessage = null
+        return try {
+            val toSave = gradesToSave()
+            repo.updatePublishedGrades(subjectId, currentActivity.id, toSave)
+            val updatedGrades = gradesByActivity[currentActivity.id].orEmpty().toMutableMap()
+            toSave.forEach { (studentId, gradeValue) ->
+                if (gradeValue == null) updatedGrades.remove(studentId) else updatedGrades[studentId] = gradeValue
+            }
+            gradesByActivity = gradesByActivity + (currentActivity.id to updatedGrades)
+            savedInputs = inputs.toMap()
+            lastSavedAt = System.currentTimeMillis()
+            true
+        } catch (e: Throwable) {
+            errorMessage = (e as? TeacherRepositoryException)?.message
+                ?: "No se pudieron guardar los cambios."
+            false
+        } finally {
+            isSaving = false
+        }
     }
 }
 
@@ -169,10 +264,16 @@ private sealed interface PendingDialog {
 fun GradeEntryScreen(
     subjectId: String,
     onBack: () -> Unit,
+    repository: TeacherRepository = remember { FirestoreTeacherRepository() },
 ) {
-    val state = remember(subjectId) { GradeEntryState(FakeTeacherRepository, subjectId) }
+    val scope = rememberCoroutineScope()
+    val state = remember(subjectId, repository) { GradeEntryState(repository, subjectId) }
     var dialog by remember { mutableStateOf<PendingDialog?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(subjectId, repository) {
+        state.loadWorkspace()
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -182,9 +283,9 @@ fun GradeEntryScreen(
     }
 
     // RNF-06: el borrador se guarda solo, poco después de dejar de escribir.
-    LaunchedEffect(state.selectedId) {
+    LaunchedEffect(state.selectedId, state.isPublished) {
         snapshotFlow { state.inputs.toMap() }.collectLatest {
-            if (!state.isPublished && state.isDirty) {
+            if (state.selected != null && !state.isPublished && !state.hasErrors && state.isDirty) {
                 delay(AUTOSAVE_DELAY_MS)
                 state.saveDraft()
             }
@@ -195,9 +296,9 @@ fun GradeEntryScreen(
         when {
             activityId == state.selectedId -> Unit
             state.isPublished && state.isDirty -> dialog = PendingDialog.DiscardAndSwitch(activityId)
-            else -> {
+            else -> scope.launch {
                 state.saveDraft()
-                state.load(activityId)
+                state.loadActivityInputs(activityId)
             }
         }
     }
@@ -210,72 +311,172 @@ fun GradeEntryScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-        ) {
-            Spacer(modifier = Modifier.height(8.dp))
-            SubjectHeader(
-                title = state.subject.name,
-                subtitle = "${state.subject.organizationName} · ${state.subject.periodName}",
-                onBack = onBack
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            ActivityCard(
-                activities = state.activities,
-                selected = state.selected,
-                saveStatus = saveStatusText(state.isPublished, state.isDirty, state.lastSavedAt, now),
-                onSelect = ::switchActivity
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            StudentsHeader(count = state.students.size)
-            Spacer(modifier = Modifier.height(16.dp))
-            StudentsCard(
-                students = state.students,
-                inputs = state.inputs,
-                parsed = state.parsed,
-                onValueChange = { studentId, text -> state.inputs[studentId] = sanitizeGradeText(text) }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        when {
+            state.isLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = NotiaPrimary)
+                }
+            }
+            state.subject == null && state.errorMessage != null -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = state.errorMessage!!,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = NotiaInk,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    NotiaSecondaryButton(
+                        text = "Reintentar",
+                        onClick = { scope.launch { state.loadWorkspace() } },
+                    )
+                }
+            }
+            else -> {
+                val subject = state.subject
+                val selectedActivity = state.selected
 
-        BottomActions(
-            isPublished = state.isPublished,
-            isDirty = state.isDirty,
-            hasErrors = state.hasErrors,
-            missingCount = state.missingCount,
-            onSaveDraft = state::saveDraft,
-            onPublish = { dialog = PendingDialog.Publish },
-            onSavePublished = { dialog = PendingDialog.SavePublished }
-        )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
+                ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SubjectHeader(
+                        title = subject?.name ?: "Materia",
+                        subtitle = listOfNotNull(subject?.organizationName, subject?.periodName)
+                            .joinToString(" · "),
+                        onBack = onBack
+                    )
+
+                    if (state.errorMessage != null) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = state.errorMessage!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = GradeError,
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (selectedActivity != null) {
+                        ActivityCard(
+                            activities = state.activities,
+                            selected = selectedActivity,
+                            saveStatus = saveStatusText(
+                                isPublished = state.isPublished,
+                                isDirty = state.isDirty,
+                                isSaving = state.isSaving,
+                                lastSavedAt = state.lastSavedAt,
+                                now = now
+                            ),
+                            onSelect = ::switchActivity
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        StudentsHeader(count = state.students.size)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        if (state.students.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(NotiaSurface, RoundedCornerShape(18.dp))
+                                    .border(1.dp, NotiaBorder, RoundedCornerShape(18.dp))
+                                    .padding(20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "No hay estudiantes inscritos en esta materia.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = NotiaTextSecondary,
+                                )
+                            }
+                        } else {
+                            StudentsCard(
+                                students = state.students,
+                                inputs = state.inputs,
+                                parsed = state.parsed,
+                                onValueChange = { studentId, text ->
+                                    state.inputs[studentId] = sanitizeGradeText(text)
+                                }
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(NotiaSurface, RoundedCornerShape(18.dp))
+                                .border(1.dp, NotiaBorder, RoundedCornerShape(18.dp))
+                                .padding(20.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Esta materia aún no tiene actividades registradas.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = NotiaTextSecondary,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                if (selectedActivity != null && state.students.isNotEmpty()) {
+                    BottomActions(
+                        isPublished = state.isPublished,
+                        isDirty = state.isDirty,
+                        hasErrors = state.hasErrors,
+                        isSaving = state.isSaving,
+                        missingCount = state.missingCount,
+                        onSaveDraft = { scope.launch { state.saveDraft() } },
+                        onPublish = { dialog = PendingDialog.Publish },
+                        onSavePublished = { dialog = PendingDialog.SavePublished }
+                    )
+                }
+            }
+        }
     }
 
     when (val current = dialog) {
         PendingDialog.Publish -> ConfirmDialog(
-            title = "¿Publicar ${state.selected.name}?",
+            title = "¿Publicar ${state.selected?.name.orEmpty()}?",
             text = buildString {
                 if (state.missingCount > 0) append("${missingText(state.missingCount)} sin nota. ")
                 append("Los estudiantes verán sus notas y recibirán una notificación.")
             },
             confirmLabel = "Publicar",
-            onConfirm = { state.publish(); dialog = null },
+            onConfirm = {
+                dialog = null
+                scope.launch { state.publish() }
+            },
             onDismiss = { dialog = null }
         )
         PendingDialog.SavePublished -> ConfirmDialog(
             title = "¿Guardar cambios?",
             text = "Estas notas ya están publicadas: los estudiantes verán el cambio de inmediato, " +
-                "recibirán una notificación y el cambio quedará en el historial.",
+                    "recibirán una notificación y el cambio quedará en el historial.",
             confirmLabel = "Guardar",
-            onConfirm = { state.savePublishedChanges(); dialog = null },
+            onConfirm = {
+                dialog = null
+                scope.launch { state.savePublishedChanges() }
+            },
             onDismiss = { dialog = null }
         )
         is PendingDialog.DiscardAndSwitch -> ConfirmDialog(
             title = "¿Descartar cambios?",
-            text = "Hay cambios sin guardar en ${state.selected.name}.",
+            text = "Hay cambios sin guardar en ${state.selected?.name.orEmpty()}.",
             confirmLabel = "Descartar",
-            onConfirm = { state.load(current.activityId); dialog = null },
+            onConfirm = {
+                state.loadActivityInputs(current.activityId)
+                dialog = null
+            },
             onDismiss = { dialog = null }
         )
         null -> Unit
@@ -284,8 +485,15 @@ fun GradeEntryScreen(
 
 private fun missingText(count: Int) = if (count == 1) "Falta 1 nota" else "Faltan $count notas"
 
-private fun saveStatusText(isPublished: Boolean, isDirty: Boolean, lastSavedAt: Long?, now: Long): String {
-    if (isDirty) return if (isPublished) "Cambios sin guardar" else "Guardando…"
+private fun saveStatusText(
+    isPublished: Boolean,
+    isDirty: Boolean,
+    isSaving: Boolean,
+    lastSavedAt: Long?,
+    now: Long,
+): String {
+    if (isSaving) return "Guardando…"
+    if (isDirty) return if (isPublished) "Cambios sin guardar" else "Sin guardar"
     if (lastSavedAt == null) return if (isPublished) "Visible para estudiantes" else "Sin cambios"
     val seconds = ((now - lastSavedAt) / 1000).coerceAtLeast(0)
     return when {
@@ -301,8 +509,10 @@ private fun SubjectHeader(title: String, subtitle: String, onBack: () -> Unit) {
         Spacer(modifier = Modifier.width(12.dp))
         Column {
             Text(text = title, style = MaterialTheme.typography.titleMedium, color = NotiaInk)
-            Spacer(modifier = Modifier.height(3.dp))
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
+            if (subtitle.isNotBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = NotiaTextSecondary)
+            }
         }
     }
 }
@@ -580,6 +790,7 @@ private fun BottomActions(
     isPublished: Boolean,
     isDirty: Boolean,
     hasErrors: Boolean,
+    isSaving: Boolean,
     missingCount: Int,
     onSaveDraft: () -> Unit,
     onPublish: () -> Unit,
@@ -590,13 +801,14 @@ private fun BottomActions(
             NotiaPrimaryButton(
                 text = "Guardar cambios",
                 onClick = onSavePublished,
-                enabled = isDirty && !hasErrors
+                enabled = isDirty && !hasErrors && !isSaving
             )
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 NotiaSecondaryButton(
                     text = "Guardar borrador",
                     onClick = onSaveDraft,
+                    enabled = !isSaving,
                     modifier = Modifier.weight(147f),
                     contentPadding = PaddingValues(horizontal = 4.dp)
                 )
@@ -604,7 +816,7 @@ private fun BottomActions(
                     text = "Publicar notas",
                     onClick = onPublish,
                     modifier = Modifier.weight(189f),
-                    enabled = !hasErrors,
+                    enabled = !hasErrors && !isSaving,
                     leadingIcon = painterResource(R.drawable.ic_eye),
                     contentPadding = PaddingValues(horizontal = 8.dp)
                 )
@@ -656,9 +868,30 @@ private fun ConfirmDialog(
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 private fun GradeEntryScreenPreview() {
+    val previewRepo = remember {
+        object : TeacherRepository {
+            override suspend fun getSubjects() = listOf(
+                TeacherSubject("sub-1", "Programación Móvil", "Univalle", "2026-II")
+            )
+            override suspend fun loadSubjectWorkspace(subjectId: String) = TeacherSubjectWorkspace(
+                subject = TeacherSubject(subjectId, "Programación Móvil", "Univalle", "2026-II"),
+                students = listOf(
+                    EnrolledStudent("u1", "Ana Castaño", "2380412"),
+                    EnrolledStudent("u2", "Brayan Mejía", "2380377"),
+                ),
+                activities = listOf(
+                    GradeActivity("a1", "Parcial 1", 30, ActivityStatus.DRAFT)
+                ),
+                gradesByActivity = mapOf("a1" to mapOf("u1" to BigDecimal("4.2"))),
+            )
+            override suspend fun saveDraft(subjectId: String, activityId: String, values: Map<String, BigDecimal?>) = Unit
+            override suspend fun publishActivity(subjectId: String, activityId: String, values: Map<String, BigDecimal?>) = Unit
+            override suspend fun updatePublishedGrades(subjectId: String, activityId: String, values: Map<String, BigDecimal?>) = Unit
+        }
+    }
     NotiaTheme {
         Surface(color = NotiaPaper) {
-            GradeEntryScreen(subjectId = FakeTeacherRepository.DEMO_SUBJECT_ID, onBack = {})
+            GradeEntryScreen(subjectId = "sub-1", onBack = {}, repository = previewRepo)
         }
     }
 }
