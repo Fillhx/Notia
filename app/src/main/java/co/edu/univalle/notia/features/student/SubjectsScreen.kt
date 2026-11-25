@@ -28,44 +28,63 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-/** Lista de materias del estudiante (RF-14, RF-15). Tocar una materia abre su detalle (RNF-01). */
+/**
+ * Lista de materias del estudiante (RF-14, RF-15). Tocar una materia abre su detalle (RNF-01).
+ * [header] va bajo el título y siempre visible (selector de organización), incluso con error o sin materias.
+ */
 @Composable
 fun SubjectsScreen(
     state: StudentLoadState<List<StudentSubjectGrades>>,
     onSubjectClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    header: @Composable () -> Unit = {},
 ) {
-    when (state) {
-        is StudentLoadState.Loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator()
-                Text("Cargando materias…", style = MaterialTheme.typography.bodyMedium)
-            }
+    Column(modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Mis materias",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            header()
         }
 
-        is StudentLoadState.Error -> Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            MessageRow(Icons.Filled.Warning, state.message)
-        }
-
-        is StudentLoadState.Success -> if (state.data.isEmpty()) {
-            Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                MessageRow(Icons.Filled.Info, "No tienes materias inscritas.")
-            }
-        } else {
-            LazyColumn(
-                modifier = modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                item {
-                    Text(
-                        "Mis materias",
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.semantics { heading() },
-                    )
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (state) {
+                is StudentLoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Cargando materias…", style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
-                items(state.data, key = { it.subject.id }) { grades ->
-                    SubjectCard(grades, onClick = { onSubjectClick(grades.subject.id) })
+
+                is StudentLoadState.Error -> Box(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MessageRow(Icons.Filled.Warning, state.message)
+                }
+
+                is StudentLoadState.Success -> if (state.data.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        MessageRow(Icons.Filled.Info, "No tienes materias inscritas.")
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(state.data, key = { it.subject.id }) { grades ->
+                            SubjectCard(grades, onClick = { onSubjectClick(grades.subject.id) })
+                        }
+                    }
                 }
             }
         }

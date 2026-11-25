@@ -28,6 +28,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import co.edu.univalle.notia.features.organizations.ActiveOrganization
+import co.edu.univalle.notia.features.organizations.OrganizationMembership
+import co.edu.univalle.notia.features.organizations.Roles
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -41,14 +44,24 @@ enum class StudentTab(val label: String, val icon: ImageVector) {
 /**
  * Punto de entrada del módulo estudiante (Routes.STUDENT).
  * Materias es el destino inicial: materia → detalle de notas queda a 1 toque (RNF-01).
+ *
+ * Por defecto usa Firestore y la organización activa ([ActiveOrganization]); al cambiar de organización
+ * se recargan materias, avisos y perfil. Con otro repositorio (p. ej. [FakeStudentRepository] en tests y
+ * previews) el selector de organización no se muestra ni se llama a Firebase.
  */
 @Composable
 fun StudentScreen(
-    repository: StudentRepository = remember { FakeStudentRepository() },
+    repository: StudentRepository = remember { FirestoreStudentRepository() },
+    organizationLoader: (suspend () -> Result<List<OrganizationMembership>>)? =
+        if (repository is FirestoreStudentRepository) ::loadMyOrganizations else null,
 ) {
+    val activeOrganization = ActiveOrganization.current
+    val activeOrgId = activeOrganization?.orgId
+
     var tab by rememberSaveable { mutableStateOf(StudentTab.SUBJECTS) }
-    var selectedSubjectId by rememberSaveable { mutableStateOf<String?>(null) }
-    var simulatorInputs by rememberSaveable { mutableStateOf(SimulatorInputs()) }
+    var selectedSubjectId by rememberSaveable(activeOrgId) { mutableStateOf<String?>(null) }
+    var simulatorInputs by rememberSaveable(activeOrgId) { mutableStateOf(SimulatorInputs()) }
+    var organizationsReload by rememberSaveable { mutableStateOf(0) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -56,45 +69,77 @@ fun StudentScreen(
     val subjectsState by produceState<StudentLoadState<List<StudentSubjectGrades>>>(
         initialValue = StudentLoadState.Loading,
         key1 = repository,
+        key2 = activeOrgId,
     ) {
+        value = StudentLoadState.Loading
         value = try {
             StudentLoadState.Success(repository.getSubjects())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            StudentLoadState.Error("No se pudieron cargar tus materias. Inténtalo de nuevo.")
+            StudentLoadState.Error(e.toUserMessage("No se pudieron cargar tus materias. Inténtalo de nuevo."))
         }
     }
 
     val noticesState by produceState<StudentLoadState<List<StudentNotice>>>(
         initialValue = StudentLoadState.Loading,
         key1 = repository,
+        key2 = activeOrgId,
     ) {
+        value = StudentLoadState.Loading
         try {
             repository.observeNotices().collect { value = StudentLoadState.Success(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            value = StudentLoadState.Error("No se pudieron cargar tus avisos. Inténtalo de nuevo.")
+            value = StudentLoadState.Error(e.toUserMessage("No se pudieron cargar tus avisos. Inténtalo de nuevo."))
         }
     }
 
     val profileState by produceState<StudentLoadState<StudentProfile>>(
         initialValue = StudentLoadState.Loading,
         key1 = repository,
+        key2 = activeOrgId,
     ) {
+        value = StudentLoadState.Loading
         value = try {
             StudentLoadState.Success(repository.getProfile())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            StudentLoadState.Error("No se pudo cargar tu perfil. Inténtalo de nuevo.")
+            StudentLoadState.Error(e.toUserMessage("No se pudo cargar tu perfil. Inténtalo de nuevo."))
+        }
+    }
+
+    val organizationsState by produceState<StudentLoadState<List<OrganizationMembership>>>(
+        initialValue = StudentLoadState.Loading,
+        key1 = organizationLoader,
+        key2 = organizationsReload,
+    ) {
+        val loader = organizationLoader
+        if (loader == null) {
+            value = StudentLoadState.Success(emptyList())
+            return@produceState
+        }
+        value = StudentLoadState.Loading
+        value = try {
+            val result = loader()
+            val organizations = result.getOrNull()
+            if (organizations != null) {
+                StudentLoadState.Success(organizations)
+            } else {
+                StudentLoadState.Error(friendlyErrorMessage(result.exceptionOrNull() ?: IllegalStateException()))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            StudentLoadState.Error(friendlyErrorMessage(e))
         }
     }
 
     // Notificaciones locales: la primera lista es la línea base; después se notifican solo avisos nuevos sin leer.
     val notifier = remember(context) { StudentNoticeNotifier(context) }
-    val detector = remember { NewNoticeDetector() }
+    val detector = remember(activeOrgId) { NewNoticeDetector() }
     val notificationSetup = rememberNotificationSetup(notifier)
     LaunchedEffect(noticesState) {
         val notices = (noticesState as? StudentLoadState.Success)?.data ?: return@LaunchedEffect
@@ -155,6 +200,20 @@ fun StudentScreen(
                     SubjectsScreen(
                         state = subjectsState,
                         onSubjectClick = { selectedSubjectId = it },
+                        header = {
+                            if (organizationLoader != null) {
+                                OrganizationSwitcher(
+                                    active = activeOrganization,
+                                    state = organizationsState,
+                                    onSelect = { organization ->
+                                        if (organization.role == Roles.STUDENT && organization.orgId != activeOrgId) {
+                                            ActiveOrganization.current = organization
+                                        }
+                                    },
+                                    onRetry = { organizationsReload++ },
+                                )
+                            }
+                        },
                     )
                 }
 

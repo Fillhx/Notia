@@ -17,6 +17,16 @@ service cloud.firestore {
       return signedIn() && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
     }
 
+    // Solo para miembros: rol Estudiante en esa organización (RN-06).
+    function isStudent(orgId) {
+      return memberData(orgId).data.rol == 'Estudiante';
+    }
+
+    // El estudiante autenticado está inscrito en la materia (campo studentIds de la materia).
+    function isEnrolled(orgId, subjectId) {
+      return request.auth.uid in get(/databases/$(database)/documents/organizations/$(orgId)/subjects/$(subjectId)).data.studentIds;
+    }
+
     // Búsqueda de "mis organizaciones" (RF-05): solo devuelve membresías propias.
     match /{path=**}/members/{memberId} {
       allow read: if signedIn() && resource.data.uid == request.auth.uid;
@@ -72,20 +82,42 @@ service cloud.firestore {
         allow delete: if hasCoordinatorRole(orgId)
           && (!('gradesCount' in resource.data) || resource.data.gradesCount == 0);
 
+        // Actividades: quien no es estudiante conserva el acceso de siempre; el estudiante solo lee
+        // actividades publicadas de materias en las que está inscrito (RN-06, RNF-05).
         match /activities/{activityId} {
-          allow read: if belongsToOrganization(orgId);
+          allow read: if belongsToOrganization(orgId)
+            && (!isStudent(orgId)
+                || (resource.data.estado == 'publicada' && isEnrolled(orgId, subjectId)));
           allow write: if hasCoordinatorRole(orgId);
         }
 
+        // Notas: el estudiante solo lee las suyas y publicadas (RN-06, RNF-04).
+        // `estado` en la nota es copia del estado de la actividad; sin ese campo el estudiante no puede leerla.
         match /grades/{gradeId} {
-          allow read: if belongsToOrganization(orgId);
+          allow read: if belongsToOrganization(orgId)
+            && (!isStudent(orgId)
+                || (resource.data.studentId == request.auth.uid && resource.data.estado == 'publicada'));
           allow write: if hasCoordinatorRole(orgId);
         }
 
+        // Historial: nunca visible para estudiantes.
         match /history/{historyId} {
-          allow read: if belongsToOrganization(orgId);
+          allow read: if belongsToOrganization(orgId) && !isStudent(orgId);
           allow create: if hasCoordinatorRole(orgId);
         }
+      }
+
+      // Avisos de notas (RF-18): el estudiante lee los suyos y solo puede cambiar el campo `read`.
+      match /notices/{noticeId} {
+        allow read: if signedIn()
+          && belongsToOrganization(orgId)
+          && resource.data.studentId == request.auth.uid;
+        allow update: if signedIn()
+          && belongsToOrganization(orgId)
+          && resource.data.studentId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+          && request.resource.data['read'] is bool;
+        allow create, delete: if hasCoordinatorRole(orgId);
       }
     }
   }
