@@ -17,18 +17,44 @@ service cloud.firestore {
       return signedIn() && exists(/databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid));
     }
 
+    // Búsqueda de "mis organizaciones" (RF-05): solo devuelve membresías propias.
+    match /{path=**}/members/{memberId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
     match /users/{uid} {
       allow read, create, update: if signedIn() && request.auth.uid == uid;
     }
 
+    // Códigos de invitación (RF-03, RF-04): se consulta por código exacto, no se lista.
+    match /inviteCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['orgId', 'orgNombre'])
+        && getAfter(/databases/$(database)/documents/organizations/$(request.resource.data.orgId)).data.creadaPor == request.auth.uid;
+    }
+
     match /organizations/{orgId} {
       allow read: if belongsToOrganization(orgId);
-      allow create: if signedIn();
+      allow create: if signedIn() && request.resource.data.creadaPor == request.auth.uid;
       allow update, delete: if hasCoordinatorRole(orgId);
 
       match /members/{uid} {
-        allow read: if belongsToOrganization(orgId);
-        allow create: if hasCoordinatorRole(orgId) || request.auth.uid == uid;
+        allow read: if belongsToOrganization(orgId) || (signedIn() && request.auth.uid == uid);
+        allow create: if hasCoordinatorRole(orgId)
+          // Unirse con código: solo como Estudiante y con un código de esta organización (RF-04).
+          || (signedIn()
+              && request.auth.uid == uid
+              && request.resource.data.uid == uid
+              && request.resource.data.rol == 'Estudiante'
+              && get(/databases/$(database)/documents/inviteCodes/$(request.resource.data.codigo)).data.orgId == orgId)
+          // Creador de la organización: Coordinación, solo en el mismo guardado que crea la organización (RF-03).
+          || (signedIn()
+              && request.auth.uid == uid
+              && request.resource.data.uid == uid
+              && request.resource.data.rol == 'Coordinación'
+              && !exists(/databases/$(database)/documents/organizations/$(orgId))
+              && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.creadaPor == request.auth.uid);
         allow update: if hasCoordinatorRole(orgId);
         allow delete: if hasCoordinatorRole(orgId) && uid != request.auth.uid;
       }
