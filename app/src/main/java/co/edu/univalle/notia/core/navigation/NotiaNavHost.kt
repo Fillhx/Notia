@@ -12,7 +12,9 @@ import co.edu.univalle.notia.features.auth.LoginScreen
 import co.edu.univalle.notia.features.auth.RegisterScreen
 import co.edu.univalle.notia.features.auth.ResetPasswordScreen
 import co.edu.univalle.notia.features.coordinator.CoordinatorScreen
+import co.edu.univalle.notia.features.organizations.ActiveOrganization
 import co.edu.univalle.notia.features.organizations.OrganizationsScreen
+import co.edu.univalle.notia.features.organizations.Roles
 import co.edu.univalle.notia.features.student.StudentScreen
 import co.edu.univalle.notia.features.teacher.TeacherScreen
 
@@ -79,10 +81,17 @@ fun NotiaNavHost() {
         }
         composable(Routes.ORGANIZATIONS) {
             OrganizationsScreen(
-                onEnterAsCoordinator = { nav.navigate(Routes.COORDINATOR) },
-                onEnterAsTeacher = { nav.navigate(Routes.TEACHER) },
-                onEnterAsStudent = { nav.navigate(Routes.STUDENT) },
+                onOrganizationSelected = { membership ->
+                    ActiveOrganization.current = membership
+                    val route = when (membership.role) {
+                        Roles.COORDINATION -> Routes.COORDINATOR
+                        Roles.TEACHER -> Routes.TEACHER
+                        else -> Routes.STUDENT
+                    }
+                    nav.navigate(route)
+                },
                 onLoggedOut = {
+                    ActiveOrganization.current = null
                     nav.navigate(Routes.LOGIN) {
                         popUpTo(Routes.ORGANIZATIONS) { inclusive = true }
                     }

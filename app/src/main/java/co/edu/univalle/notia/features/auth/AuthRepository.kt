@@ -7,6 +7,8 @@ import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.tasks.await
 
@@ -24,6 +26,14 @@ class AuthRepository(
         val result = auth.createUserWithEmailAndPassword(email, password).await()
         val profile = UserProfileChangeRequest.Builder().setDisplayName(name).build()
         result.user?.updateProfile(profile)?.await()
+        result.user?.uid?.let { userId ->
+            try {
+                FirebaseFirestore.getInstance().collection("users").document(userId)
+                    .set(mapOf("nombre" to name, "correo" to email)).await()
+            } catch (e: FirebaseFirestoreException) {
+                // Si falla guardar el perfil, la cuenta igual queda creada.
+            }
+        }
         result.user?.sendEmailVerification()?.await()
         // La cuenta no se usa hasta que el correo esté verificado.
         auth.signOut()
